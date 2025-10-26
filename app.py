@@ -17,7 +17,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram import ParseMode
 
 # ---------------- Config ----------------
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("8239266013:AAHoOITQp3OepWy94DdDE82SbeQFgcHiqwY", "")
 # per-chat processing flags & threads
 _processing_flags = {}   # chat_id -> {'running': bool, 'thread': Thread}
 # simulation probabilities (tweak safely)
